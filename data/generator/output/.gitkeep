@@ -1,0 +1,11 @@
+# Output Directory
+This directory is used to store generated synthetic data files.
+
+## Contents
+- CSV files: Transaction data in CSV format
+- Parquet files: Transaction data in Parquet format
+- Stats: Dataset statistics and visualizations
+
+## Note
+All files in this directory are generated and should not be committed to version control.
+Add output file patterns to .gitignore.

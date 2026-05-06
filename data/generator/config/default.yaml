@@ -1,0 +1,176 @@
+# Default Configuration for Synthetic Data Generator
+# This file contains the default settings for transaction generation
+
+generator:
+  seed: 42
+  num_transactions: 100000
+  fraud_rate: 0.02
+  output_format: "file"  # "kafka" | "file" | "both"
+  output_path: "./output"
+
+kafka:
+  bootstrap_servers: "localhost:9092"
+  topic: "transactions"
+  client_id: "synthetic-data-generator"
+  acks: "all"
+  retries: 3
+  retry_backoff_ms: 100
+  batch_size: 16384
+  linger_ms: 5
+  compression_type: "snappy"
+  # Security settings
+  security_protocol: "PLAINTEXT"
+  sasl_mechanism: null
+  sasl_username: null
+  sasl_password: null
+
+streaming:
+  rate_per_sec: 1000
+  burst_enabled: false
+  burst_size: 10000
+  burst_duration_sec: 10
+
+indian_banking:
+  banks:
+    - name: "SBI"
+      weight: 0.25
+    - name: "PNB"
+      weight: 0.15
+    - name: "BOB"
+      weight: 0.15
+    - name: "UNION_BANK"
+      weight: 0.15
+    - name: "HDFC"
+      weight: 0.15
+    - name: "ICICI"
+      weight: 0.15
+  
+  account_types:
+    savings: 0.60
+    current: 0.15
+    jan_dhan: 0.10
+    nri: 0.05
+    corporate: 0.10
+  
+  channels:
+    UPI: 0.45
+    NEFT: 0.15
+    RTGS: 0.05
+    IMPS: 0.20
+    ATM: 0.08
+    POS: 0.05
+    INTERNET_BANKING: 0.02
+  
+  cities:
+    - name: "Mumbai"
+      state: "Maharashtra"
+      weight: 0.15
+    - name: "Delhi"
+      state: "Delhi"
+      weight: 0.12
+    - name: "Bangalore"
+      state: "Karnataka"
+      weight: 0.10
+    - name: "Chennai"
+      state: "Tamil Nadu"
+      weight: 0.08
+    - name: "Hyderabad"
+      state: "Telangana"
+      weight: 0.08
+    - name: "Kolkata"
+      state: "West Bengal"
+      weight: 0.07
+    - name: "Pune"
+      state: "Maharashtra"
+      weight: 0.06
+    - name: "Ahmedabad"
+      state: "Gujarat"
+      weight: 0.05
+    - name: "Jaipur"
+      state: "Rajasthan"
+      weight: 0.04
+    - name: "Lucknow"
+      state: "Uttar Pradesh"
+      weight: 0.04
+    - name: "Chandigarh"
+      state: "Punjab"
+      weight: 0.03
+    - name: "Bhopal"
+      state: "Madhya Pradesh"
+      weight: 0.03
+    - name: "Patna"
+      state: "Bihar"
+      weight: 0.03
+    - name: "Ranchi"
+      state: "Jharkhand"
+      weight: 0.02
+    - name: "Guwahati"
+      state: "Assam"
+      weight: 0.02
+    - name: "Thiruvananthapuram"
+      state: "Kerala"
+      weight: 0.02
+    - name: "Chennai"
+      state: "Tamil Nadu"
+      weight: 0.03
+    - name: "Coimbatore"
+      state: "Tamil Nadu"
+      weight: 0.02
+    - name: "Indore"
+      state: "Madhya Pradesh"
+      weight: 0.02
+  
+  amount_range:
+    min: 100.0
+    max: 10000000.0  # 1 Crore
+    distribution: "log_normal"
+    mean_log: 8.5
+    std_log: 1.5
+  
+  temporal:
+    peak_hours: [10, 11, 15, 16, 17]
+    peak_weight: 2.0
+    off_peak_weight: 0.5
+
+fraud_patterns:
+  layering:
+    enabled: true
+    weight: 0.167
+    min_hops: 4
+    max_hops: 8
+    time_window_mins: 60
+  
+  circular:
+    enabled: true
+    weight: 0.167
+    min_cycle_length: 3
+    max_cycle_length: 6
+  
+  mule_activation:
+    enabled: true
+    weight: 0.167
+    min_dormant_days: 30
+    activation_burst_count: 15
+  
+  structuring:
+    enabled: true
+    weight: 0.167
+    threshold: 999999.0
+    time_window_mins: 120
+  
+  round_tripping:
+    enabled: true
+    weight: 0.167
+    duration_days: 7
+  
+  hub_spoke:
+    enabled: true
+    weight: 0.166
+    min_receivers: 10
+    distribution_window_mins: 60
+
+evaluation:
+  enabled: false
+  total_transactions: 1000000
+  fraud_rate: 0.02
+  balance_fraud_types: true

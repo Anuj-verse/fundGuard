@@ -1,0 +1,145 @@
+# Synthetic Data Generator
+
+A Python-based system that produces realistic Indian banking transaction data for the FundGuard fraud detection platform.
+
+## Features
+
+- **Realistic Indian Banking Transactions**: Generates transactions with proper Indian locale attributes (banks, cities, names, PAN, mobile numbers)
+- **Six Fraud Pattern Injectors**: Layering, Circular, Mule Activation, Structuring, Round-Tripping, Hub-and-Spoke
+- **Kafka Streaming**: Stream transactions at configurable rates (100-10K txns/sec) for load testing
+- **Reproducible Datasets**: Seed-based generation ensures identical outputs across runs
+- **Evaluation Dataset Generation**: Generate labelled 1M transaction datasets for ML model training
+
+## Quick Start
+
+### Installation
+
+```bash
+# Using pip
+pip install -e .
+
+# Or install with dev dependencies
+pip install -e ".[dev]"
+```
+
+### Basic Usage
+
+```python
+from synthetic_generator import GeneratorConfig, TransactionGenerator
+
+# Create configuration
+config = GeneratorConfig(
+    seed=42,
+    num_transactions=10000,
+    fraud_rate=0.02
+)
+
+# Generate transactions
+generator = TransactionGenerator(config)
+transactions = generator.generate_batch(100)
+
+# Output to file
+transactions.to_csv("./output/transactions.csv")
+```
+
+### CLI Usage
+
+```bash
+# Generate evaluation dataset
+synthetic-generator --config config/evaluation.yaml --seed 42
+
+# Stream to Kafka
+synthetic-generator --config config/load_test.yaml --format kafka
+```
+
+## Configuration
+
+Configuration files are located in `config/`:
+
+| File | Purpose |
+|------|---------|
+| `default.yaml` | Default settings for general use |
+| `evaluation.yaml` | 1M transaction evaluation dataset |
+| `load_test.yaml` | Kafka streaming load tests |
+
+## Project Structure
+
+```
+fundguard/data/generator/
+├── config/                    # Configuration files
+│   ├── default.yaml
+│   ├── evaluation.yaml
+│   └── load_test.yaml
+├── src/synthetic_generator/   # Source code
+│   ├── core/                  # Core components (seed, accounts, transactions)
+│   ├── fraud/                 # Fraud pattern injectors
+│   ├── kafka/                 # Kafka producer
+│   ├── locale/                # Indian locale data
+│   ├── models/                # Pydantic data models
+│   ├── output/                # Output writers
+│   ├── stats/                 # Statistics and visualization
+│   └── evaluation/            # Evaluation dataset generation
+├── tests/                     # Test suite
+├── scripts/                   # Helper scripts
+└── output/                    # Generated output
+```
+
+## Fraud Patterns
+
+| Pattern | Description |
+|---------|-------------|
+| **Layering** | Multi-hop money laundering chains (4-8 transactions) |
+| **Circular** | Money cycles returning to origin (3-6 accounts) |
+| **Mule Activation** | Dormant accounts suddenly active with burst transactions |
+| **Structuring** | Smurfing patterns below ₹10L reporting threshold |
+| **Round-Tripping** | Fake business transactions between corporate accounts |
+| **Hub-and-Spoke** | Money mule network distribution patterns |
+
+## Development
+
+### Running Tests
+
+```bash
+# Run all tests
+pytest
+
+# Run with coverage
+pytest --cov=synthetic_generator
+
+# Run property-based tests
+pytest -m property
+```
+
+### Code Quality
+
+```bash
+# Format code
+ruff format .
+
+# Lint code
+ruff check .
+
+# Type check
+mypy src/
+```
+
+## Requirements Coverage
+
+| Requirement | Description |
+|-------------|-------------|
+| 1.1-1.5 | Core transaction generation |
+| 2.1-2.5 | Layering fraud pattern |
+| 3.1-3.5 | Circular fraud pattern |
+| 4.1-4.5 | Mule activation pattern |
+| 5.1-5.5 | Structuring pattern |
+| 6.1-6.5 | Round-tripping pattern |
+| 7.1-7.5 | Hub-and-spoke pattern |
+| 8.1-8.5 | Kafka streaming |
+| 9.1-9.5 | Evaluation datasets |
+| 10.1-10.5 | Statistics and visualization |
+| 11.1-11.5 | Indian locale support |
+| 12.1-12.5 | Reproducibility and configuration |
+
+## License
+
+MIT License - See LICENSE file for details.
