@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+@theme {
+  --color-dark-bg: #0a0a0a;
+  --color-dark-surface: #1a1a1a;
+  --color-safe: #00ff88;
+  --color-alert: #ff4444;
+  --color-warn: #ffaa00;
+
+  --font-mono: "Courier New", Courier, monospace;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-dark-bg);
+    color: #e5e5e5;
+  }
+}
