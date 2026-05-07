@@ -1,0 +1,18 @@
+services:
+  risk-engine:
+    build: .
+    ports:
+      - "8004:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - EDGE_SERVICE_URL=http://edge-service:8000
+      - GRAPH_SERVICE_URL=http://graph-service:8000
+      - KAFKA_BROKERS=kafka:9092
+    depends_on:
+      - redis
+    restart: always
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
