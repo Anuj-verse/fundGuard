@@ -4,11 +4,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import PlainTextResponse
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
-from app.schemas import TransactionRequest, ScoreResponse
+from app.schemas import TransactionRequest, TransactionLiveEvent
 from app.features import FeatureExtractor
 from app.scorer import OnnxScorer
 from app.kafka import KafkaPublisher
 from app.metrics import REQUEST_COUNT, LATENCY_HISTOGRAM
+from app.redis_client import get_and_update_velocity, redis_client
 
 app = FastAPI(title="FundGuard Edge Service")
 
@@ -37,6 +38,7 @@ async def startup_event():
 async def shutdown_event():
     if kafka_publisher:
         kafka_publisher.shutdown()
+    await redis_client.close()
 
 @app.get("/health")
 def health_check():
@@ -46,7 +48,7 @@ def health_check():
 def get_metrics():
     return PlainTextResponse(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
-@app.post("/score", response_model=ScoreResponse)
+@app.post("/score")
 async def score_transaction(req: TransactionRequest):
     if not scorer:
         raise HTTPException(status_code=503, detail="Model not loaded")
@@ -54,6 +56,12 @@ async def score_transaction(req: TransactionRequest):
     start_time = time.time()
     
     try:
+        # Fetch & Update Redis Features
+        redis_features = await get_and_update_velocity(req.sender_account_id, req.amount)
+        req.sender_velocity_1h = redis_features["sender_velocity_1h"]
+        req.sender_velocity_24h = redis_features["sender_velocity_24h"]
+        req.amount_vs_avg_ratio = redis_features["amount_vs_avg_ratio"]
+
         # Extract features
         features = feature_extractor.extract(req)
         
@@ -67,31 +75,23 @@ async def score_transaction(req: TransactionRequest):
         REQUEST_COUNT.labels(decision=decision).inc()
         LATENCY_HISTOGRAM.observe(latency_ms / 1000.0)
         
-        # Prepare response
-        feature_names = [
-            "amount", "log_amount", "hour_of_day", "day_of_week", "is_weekend",
-            "channel_encoded", "sender_velocity_1h", "sender_velocity_24h",
-            "receiver_velocity_1h", "amount_vs_avg_ratio", "is_new_account",
-            "device_change_flag", "geo_distance_km", "is_international",
-            "structuring_flag", "round_amount_flag", "beneficiary_risk_score",
-            "account_age_days"
-        ]
-        
-        # In python >= 3.10 we can use zip and dict
-        features_dict = dict(zip(feature_names, features[0].tolist()))
-        
-        resp = ScoreResponse(
-            transaction_id=req.transaction_id,
-            anomaly_score=anomaly_score,
-            decision=decision,
-            latency_ms=latency_ms,
-            features_used=features_dict
+        # Prepare live event
+        live_event = TransactionLiveEvent(
+            transaction=req,
+            edge_score=anomaly_score,
+            edge_decision=decision,
+            latency_ms=latency_ms
         )
         
-        # Publish to Kafka
-        kafka_publisher.publish(resp.model_dump())
+        # Publish to Kafka properly
+        kafka_publisher.publish(live_event.model_dump(mode='json'))
         
-        return resp
+        return {
+            "transaction_id": req.transaction_id,
+            "anomaly_score": anomaly_score,
+            "decision": decision,
+            "latency_ms": latency_ms
+        }
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

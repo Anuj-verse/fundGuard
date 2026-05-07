@@ -12,8 +12,15 @@ class GraphKafkaConsumer:
         self.neo4j_graph = neo4j_graph
         self.pattern_cache = pattern_cache
         self.consumer = None
+        self.producer = None
         self.running = False
         self.thread = None
+
+    def _get_producer(self):
+        if not self.producer:
+            from confluent_kafka import Producer
+            self.producer = Producer({'bootstrap.servers': self.bootstrap_servers})
+        return self.producer
 
     def start(self):
         self.running = True
@@ -53,24 +60,46 @@ class GraphKafkaConsumer:
                     continue
 
             try:
-                txn = json.loads(msg.value().decode('utf-8'))
+                print(f"Processing raw message: {msg.value()}")
+                msg_val = json.loads(msg.value().decode('utf-8'))
+                txn = msg_val.get("transaction", msg_val)
                 
-                # We expect txn to contain fields like sender_account_id, receiver_account_id, etc.
                 # 1. Ingest into Neo4j
+                txn["anomaly_score"] = msg_val.get("edge_score", 0.0)
+                print(f"Ingesting txn: {txn['transaction_id']}")
                 self.neo4j_graph.ingest_transaction(txn)
+                print(f"Ingested txn: {txn['transaction_id']}")
                 
                 # 2. Check for patterns immediately
                 new_patterns = self.neo4j_graph.check_patterns(txn)
+                pattern_types = []
                 for p in new_patterns:
-                    # Append to the global pattern cache
                     self.pattern_cache.append({
                         "transaction_id": txn.get("transaction_id"),
                         "pattern": p
                     })
-                    
-                # Keep cache bounded (e.g. max 1000 items)
+                    pattern_types.append(p.get("type"))
+                print(f"Checked patterns for txn {txn['transaction_id']}: {pattern_types}")
+                
                 if len(self.pattern_cache) > 1000:
                     self.pattern_cache.pop(0)
 
+                # 3. Publish to KAFKA graph-events so risk-engine can consume it
+                producer = self._get_producer()
+                if producer:
+                    graph_event = {
+                        "transaction_id": txn.get("transaction_id"),
+                        "sender_account_id": txn.get("sender_account_id"),
+                        "receiver_account_id": txn.get("receiver_account_id"),
+                        "graph_risk_score": 0.8 if len(pattern_types) > 0 else 0.0,
+                        "graph_flags": pattern_types,
+                        "graph_subnetwork": {},
+                        "transaction": txn,
+                        "edge_score": msg_val.get("edge_score", 0.0)
+                    }
+                    print(f"Publishing to graph-events: {txn['transaction_id']}")
+                    producer.produce("graph-events", value=json.dumps(graph_event).encode('utf-8'))
+                    producer.flush(timeout=0.1)
+
             except Exception as e:
-                logger.error(f"Error processing message: {e}")
+                print(f"Error processing message inside block: {e}")
