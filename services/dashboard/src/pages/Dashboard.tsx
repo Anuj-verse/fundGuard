@@ -11,6 +11,9 @@ type RiskEvent = {
   };
 };
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8005";
+const WS_URL = import.meta.env.VITE_WS_URL ?? API_BASE_URL.replace("http", "ws") + "/ws";
+
 export default function Dashboard() {
   const [alerts, setAlerts] = useState<RiskEvent[]>([]);
   const [latestEvent, setLatestEvent] = useState<RiskEvent | null>(null);
@@ -26,7 +29,23 @@ export default function Dashboard() {
   });
 
   useEffect(() => {
-    const ws = new WebSocket("ws://localhost:8005/ws");
+    let cancelled = false;
+
+    fetch(`${API_BASE_URL}/api/history/dashboard-stats`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) setStats(data);
+      })
+      .catch(() => undefined);
+
+    fetch(`${API_BASE_URL}/api/history/recent-alerts?limit=10`)
+      .then((res) => res.json())
+      .then((data: RiskEvent[]) => {
+        if (!cancelled) setAlerts(data);
+      })
+      .catch(() => undefined);
+
+    const ws = new WebSocket(WS_URL);
 
     ws.onopen = () => {
       streamStartedAt.current = Date.now();
@@ -63,6 +82,7 @@ export default function Dashboard() {
     ws.onclose = () => setWsConnected(false);
 
     return () => {
+      cancelled = true;
       setWsConnected(false);
       ws.close();
     };
