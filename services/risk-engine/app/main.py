@@ -12,72 +12,103 @@ from app.redis_client import redis_client
 KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "localhost:9092")
 
 producer = None
+producer_lock = threading.Lock()
 consumer_thread = None
 running = False
 
-def consume_graph_events():
-    consumer = KafkaConsumer(
-        "graph-events",
-        bootstrap_servers=KAFKA_BROKERS,
-        value_deserializer=lambda v: json.loads(v.decode('utf-8')),
-        auto_offset_reset='latest'
-    )
-    for msg in consumer:
-        if not running:
-            break
+
+def get_or_create_producer():
+    global producer
+    if producer:
+        return producer
+
+    with producer_lock:
+        if producer:
+            return producer
         try:
-            event = msg.value
-            txn_dict = event.get("transaction", {})
-            txn_id = event.get("transaction_id", "unknown")
-            edge_score = float(event.get("edge_score", 0.0))
-            graph_score = float(event.get("graph_risk_score", 0.0))
-            graph_flags = event.get("graph_flags", [])
-
-            # Simple static rule simulation on unwrapped payload
-            amount = float(txn_dict.get("amount", 0))
-            rule_score = 0.2 if amount > 500000 else 0.0
-            triggered = ["HIGH_AMOUNT"] if amount > 500000 else []
-
-            unified_score = (rule_score * 0.2) + (edge_score * 0.5) + (graph_score * 0.3)
-            unified_score = min(unified_score, 1.0)
-            
-            decision = "APPROVE"
-            if unified_score > 0.8:
-                decision = "REJECT"
-            elif unified_score > 0.5:
-                decision = "REVIEW"
-
-            response = {
-                "transaction_id": txn_id,
-                "unified_score": unified_score,
-                "decision": decision,
-                "components": {
-                    "edge_score": edge_score,
-                    "graph_score": graph_score,
-                    "rule_score": rule_score,
-                    "graph_flags": graph_flags
-                }
-            }
-            if producer:
-                print(f"Publishing risk score for txn {txn_id}")
-                producer.send("risk-scores", value=response)
-                producer.flush(timeout=0.1)
+            producer = KafkaProducer(
+                bootstrap_servers=KAFKA_BROKERS,
+                value_serializer=lambda v: json.dumps(v).encode('utf-8')
+            )
+            print("Connected Kafka producer for risk-engine")
         except Exception as e:
-            print(f"Error processing graph-events message: {e}")
+            print(f"Risk-engine producer connection failed: {e}")
+            producer = None
+    return producer
+
+def consume_graph_events():
+    while running:
+        try:
+            consumer = KafkaConsumer(
+                "graph-events",
+                bootstrap_servers=KAFKA_BROKERS,
+                value_deserializer=lambda v: json.loads(v.decode('utf-8')),
+                auto_offset_reset='latest'
+            )
+            print("Connected Kafka consumer for graph-events")
+
+            for msg in consumer:
+                if not running:
+                    break
+                try:
+                    event = msg.value
+                    txn_dict = event.get("transaction", {})
+                    txn_id = event.get("transaction_id", "unknown")
+                    edge_score = float(event.get("edge_score", 0.0))
+                    graph_score = float(event.get("graph_risk_score", 0.0))
+                    graph_flags = event.get("graph_flags", [])
+
+                    # Simple static rule simulation on unwrapped payload
+                    amount = float(txn_dict.get("amount", 0))
+                    rule_score = 1.0 if amount > 500000 else 0.0
+                    triggered = ["HIGH_AMOUNT"] if amount > 500000 else []
+
+                    unified_score = (rule_score * 0.3) + (edge_score * 0.4) + (graph_score * 0.3)
+
+                    # Boost score heavily if there are blatant graph flags or rule triggers
+                    if triggered or graph_flags:
+                        unified_score += 0.5
+
+                    unified_score = min(unified_score, 1.0)
+
+                    decision = "APPROVE"
+                    if unified_score > 0.8:
+                        decision = "REJECT"
+                    elif unified_score > 0.5:
+                        decision = "REVIEW"
+
+                    response = {
+                        "transaction_id": txn_id,
+                        "unified_score": unified_score,
+                        "decision": decision,
+                        "components": {
+                            "edge_score": edge_score,
+                            "graph_score": graph_score,
+                            "rule_score": rule_score,
+                            "graph_flags": graph_flags
+                        }
+                    }
+
+                    active_producer = get_or_create_producer()
+                    if active_producer:
+                        print(f"Publishing risk score for txn {txn_id}")
+                        active_producer.send("risk-scores", value=response)
+                        active_producer.flush(timeout=0.1)
+                except Exception as e:
+                    print(f"Error processing graph-events message: {e}")
+
+            consumer.close()
+        except Exception as e:
+            print(f"Risk-engine consumer connection failed: {e}. Retrying in 3s...")
+            time.sleep(3)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global producer, consumer_thread, running
     running = True
-    try:
-        producer = KafkaProducer(
-            bootstrap_servers=KAFKA_BROKERS,
-            value_serializer=lambda v: json.dumps(v).encode('utf-8')
-        )
-        consumer_thread = threading.Thread(target=consume_graph_events, daemon=True)
-        consumer_thread.start()
-    except Exception as e:
-        print(f"Warning: Could not connect to Kafka. {e}")
+    get_or_create_producer()
+    consumer_thread = threading.Thread(target=consume_graph_events, daemon=True)
+    consumer_thread.start()
     yield
     running = False
     if producer:

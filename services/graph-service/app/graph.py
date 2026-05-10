@@ -186,7 +186,7 @@ class Neo4jGraph:
             path = row["path"]
             for node in path.nodes:
                 nid = node.element_id
-                nodes[nid] = {"id": node.get("id"), "labels": list(node.labels)}
+                nodes[nid] = {"node_id": nid, "id": node.get("id"), "labels": list(node.labels)}
             for rel in path.relationships:
                 edges.append({
                     "source": rel.start_node.element_id,

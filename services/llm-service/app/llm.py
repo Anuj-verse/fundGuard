@@ -94,9 +94,9 @@ def _fallback_response(request: ExplainRequest, similar_cases: list[dict[str, An
 
 def generate_explanation(request: ExplainRequest, similar_cases: list[dict[str, Any]]) -> ExplainResponse:
     prompt = _build_prompt(request, similar_cases)
-    client = get_llm_client()
 
     try:
+        client = get_llm_client()
         if LLM_PROVIDER == "groq":
             response = client.chat.completions.create(
                 model=GROQ_MODEL,
