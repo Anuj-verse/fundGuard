@@ -72,9 +72,11 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/0
       - KAFKA_BROKERS=kafka:29092
+      - DATABASE_URL=postgresql://postgres:frauddefend@postgres:5432/fundguard
     depends_on:
       - redis
       - kafka
+      - postgres
 
   llm-service:
     build: 
@@ -90,13 +92,29 @@ services:
     environment:
       - KAFKA_BROKERS=kafka:29092
       - LLM_SERVICE_URL=http://llm-service:8000
+      - DATABASE_URL=postgresql+asyncpg://postgres:frauddefend@postgres:5432/fundguard
     depends_on:
       - kafka
       - llm-service
+      - postgres
 
   dashboard:
     build: 
       context: ./dashboard
     ports:
       - "3000:80"
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=frauddefend
+      - POSTGRES_DB=fundguard
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
 

@@ -26,6 +26,23 @@ export default function Dashboard() {
   });
 
   useEffect(() => {
+    // Load historical data on mount
+    fetch("http://localhost:8005/api/stats")
+      .then(r => r.json())
+      .then(data => {
+        setStats(prev => ({...prev, ...data}));
+      })
+      .catch(console.error);
+
+    fetch("http://localhost:8005/api/recent-alerts?limit=10")
+      .then(r => r.json())
+      .then(data => {
+        setAlerts(data);
+      })
+      .catch(console.error);
+  }, []);
+
+  useEffect(() => {
     const ws = new WebSocket("ws://localhost:8005/ws");
 
     ws.onopen = () => {

@@ -7,6 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from aiokafka import AIOKafkaConsumer
 import httpx
 import xml.etree.ElementTree as ET
+from pydantic import BaseModel
+from fastapi import Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, desc, func
+from app.database import get_db
+from app.models import RiskScoreRecord, Case
 
 KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "localhost:9092")
 LLM_SERVICE_URL = os.getenv("LLM_SERVICE_URL", "http://localhost:8004")
@@ -62,6 +68,80 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         clients.remove(websocket)
+
+# --- Database Persistence REST Endpoints ---
+
+class CaseUpdate(BaseModel):
+    status: str
+
+@app.get("/api/recent-alerts")
+async def get_recent_alerts(limit: int = 50, db: AsyncSession = Depends(get_db)):
+    """Return most recent flagged items for pre-seeding the dashboard dashboard"""
+    result = await db.execute(
+        select(RiskScoreRecord)
+        .where(RiskScoreRecord.decision.in_(["REJECT", "REVIEW"]))
+        .order_by(desc(RiskScoreRecord.created_at))
+        .limit(limit)
+    )
+    records = result.scalars().all()
+    # Transform to match formatting expected by Dashboard.tsx
+    return [{
+        "transaction_id": r.transaction_id,
+        "unified_score": r.unified_score,
+        "decision": r.decision
+    } for r in records]
+
+@app.get("/api/stats")
+async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
+    """Compute cumulative stats for hydration"""
+    total_result = await db.execute(select(func.count(RiskScoreRecord.transaction_id)))
+    total = total_result.scalar() or 0
+
+    reject_result = await db.execute(
+        select(func.count(RiskScoreRecord.transaction_id))
+        .where(RiskScoreRecord.decision == "REJECT")
+    )
+    rejects = reject_result.scalar() or 0
+
+    alerts_result = await db.execute(
+        select(func.count(RiskScoreRecord.transaction_id))
+        .where(RiskScoreRecord.decision.in_(["REJECT", "REVIEW"]))
+    )
+    alerts = alerts_result.scalar() or 0
+
+    fraud_pct = (rejects / total * 100) if total > 0 else 0
+
+    return {
+        "fraudRate": f"{fraud_pct:.2f}%",
+        "activeAlerts": alerts,
+        "highRisk": rejects,
+        "liveEvents": total,
+        "rejectedEvents": rejects,
+        "transMin": "N/A" 
+    }
+
+@app.get("/api/cases")
+async def list_cases(limit: int = 50, db: AsyncSession = Depends(get_db)):
+    """Returns the persistent cases for human review"""
+    result = await db.execute(
+        select(Case)
+        .order_by(desc(Case.created_at))
+        .limit(limit)
+    )
+    cases = result.scalars().all()
+    return [c.to_dict() for c in cases]
+
+@app.patch("/api/cases/{case_id}")
+async def update_case(case_id: str, payload: CaseUpdate, db: AsyncSession = Depends(get_db)):
+    """Update a case (Assign investigation, resolve, etc)"""
+    result = await db.execute(select(Case).where(Case.id == case_id))
+    record = result.scalar_one_or_none()
+    if not record:
+         raise HTTPException(status_code=404, detail="Case not found")
+    record.status = payload.status
+    await db.commit()
+    await db.refresh(record)
+    return record.to_dict()
 
 @app.post("/api/explain")
 async def explain_transaction(payload: dict):

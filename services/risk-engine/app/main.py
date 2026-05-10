@@ -8,6 +8,8 @@ from contextlib import asynccontextmanager
 
 from app.schemas import TransactionRequest
 from app.redis_client import redis_client
+from app.database import SessionLocal, engine
+from app.models import Base, RiskScoreRecord, Case
 
 KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "localhost:9092")
 
@@ -94,6 +96,43 @@ def consume_graph_events():
                         print(f"Publishing risk score for txn {txn_id}")
                         active_producer.send("risk-scores", value=response)
                         active_producer.flush(timeout=0.1)
+
+                    # Persistence logic
+                    try:
+                        db = SessionLocal()
+                        # 1. Record Risk Score
+                        record = RiskScoreRecord(
+                            transaction_id=txn_id,
+                            sender_account_id=txn_dict.get("sender_account_id"),
+                            receiver_account_id=txn_dict.get("receiver_account_id"),
+                            amount=amount,
+                            unified_score=unified_score,
+                            edge_score=edge_score,
+                            graph_score=graph_score,
+                            rule_score=rule_score,
+                            graph_flags=graph_flags,
+                            decision=decision
+                        )
+                        db.add(record)
+
+                        # 2. Create Case if high risk
+                        if decision in ["REJECT", "REVIEW"]:
+                            # Check for existing to prevent duplication
+                            existing_case = db.query(Case).filter(Case.transaction_id == txn_id).first()
+                            if not existing_case:
+                                new_case = Case(
+                                    transaction_id=txn_id,
+                                    sender_account_id=txn_dict.get("sender_account_id"),
+                                    unified_score=unified_score,
+                                    decision=decision,
+                                    status="OPEN"
+                                )
+                                db.add(new_case)
+                        
+                        db.commit()
+                        db.close()
+                    except Exception as db_err:
+                        print(f"Database persistence error: {db_err}")
                 except Exception as e:
                     print(f"Error processing graph-events message: {e}")
 
@@ -105,6 +144,14 @@ def consume_graph_events():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global producer, consumer_thread, running
+    
+    # Auto create tables
+    try:
+        Base.metadata.create_all(bind=engine)
+        print("Successfully created/verified database tables.")
+    except Exception as e:
+        print(f"Error running database migration: {e}")
+
     running = True
     get_or_create_producer()
     consumer_thread = threading.Thread(target=consume_graph_events, daemon=True)
