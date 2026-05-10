@@ -21,6 +21,30 @@ export default function Alerts() {
   }, [alerts]);
 
   useEffect(() => {
+    void (async () => {
+      try {
+        const resp = await fetch("http://localhost:8005/api/recent-alerts?limit=100");
+        if (!resp.ok) {
+          return;
+        }
+        const data = await resp.json();
+        setAlerts(
+          data
+            .slice()
+            .reverse()
+            .map((row: { transaction_id?: string; unified_score?: number; decision?: string; created_at?: string }) => ({
+              time: row.created_at ? new Date(row.created_at).toLocaleTimeString() : new Date().toLocaleTimeString(),
+              transaction_id: row.transaction_id || `TXN-${Math.floor(Math.random() * 1000000)}`,
+              details: "Historical anomaly from risk stream",
+              score: row.unified_score || 0.0,
+              decision: row.decision || "REVIEW",
+            }))
+        );
+      } catch {
+        // fallback to live websocket-only mode
+      }
+    })();
+
     const ws = new WebSocket("ws://localhost:8005/ws");
     
     ws.onmessage = (event) => {

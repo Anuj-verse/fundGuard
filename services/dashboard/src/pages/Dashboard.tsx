@@ -26,6 +26,28 @@ export default function Dashboard() {
   });
 
   useEffect(() => {
+    void (async () => {
+      try {
+        const [alertsResp, statsResp] = await Promise.all([
+          fetch("http://localhost:8005/api/recent-alerts?limit=10"),
+          fetch("http://localhost:8005/api/stats"),
+        ]);
+        if (alertsResp.ok) {
+          const initialAlerts = (await alertsResp.json()) as RiskEvent[];
+          setAlerts(initialAlerts);
+          if (initialAlerts.length > 0) {
+            setLatestEvent(initialAlerts[0]);
+          }
+        }
+        if (statsResp.ok) {
+          const initialStats = await statsResp.json();
+          setStats((prev) => ({ ...prev, ...initialStats }));
+        }
+      } catch {
+        // fallback to live websocket-only mode
+      }
+    })();
+
     const ws = new WebSocket("ws://localhost:8005/ws");
 
     ws.onopen = () => {

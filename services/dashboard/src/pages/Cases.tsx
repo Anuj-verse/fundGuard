@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -10,7 +10,7 @@ import {
 
 type CaseData = {
   id: string;
-  accountId: string;
+  transaction_id: string;
   riskScore: number;
   status: string;
   created: string;
@@ -23,8 +23,8 @@ const columns = [
     header: 'Case ID',
     cell: info => <span className="font-mono text-gray-300">{info.getValue()}</span>,
   }),
-  columnHelper.accessor('accountId', {
-    header: 'Account ID',
+  columnHelper.accessor('transaction_id', {
+    header: 'Transaction ID',
     cell: info => <span className="font-mono text-gray-400">{info.getValue()}</span>,
   }),
   columnHelper.accessor('riskScore', {
@@ -54,12 +54,30 @@ const columns = [
 ]
 
 export default function Cases() {
-  const data = useMemo<CaseData[]>(() => [
-    { id: 'CASE-1001', accountId: 'ACC-09923', riskScore: 92, status: 'Open', created: '2026-05-10T10:15:00' },
-    { id: 'CASE-1002', accountId: 'ACC-01044', riskScore: 85, status: 'Open', created: '2026-05-10T09:42:00' },
-    { id: 'CASE-1003', accountId: 'ACC-54421', riskScore: 65, status: 'Investigating', created: '2026-05-09T16:20:00' },
-    { id: 'CASE-1004', accountId: 'ACC-99812', riskScore: 40, status: 'Closed', created: '2026-05-08T11:05:00' },
-  ], [])
+  const [data, setData] = useState<CaseData[]>([])
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const resp = await fetch("http://localhost:8005/api/cases?limit=200");
+        if (!resp.ok) {
+          return;
+        }
+        const rows = await resp.json();
+        setData(
+          rows.map((row: { id: string; transaction_id: string; risk_score: number; status: string; created_at: string }) => ({
+            id: row.id,
+            transaction_id: row.transaction_id,
+            riskScore: row.risk_score,
+            status: row.status,
+            created: row.created_at,
+          }))
+        );
+      } catch {
+        // fallback to empty state
+      }
+    })();
+  }, [])
 
   const table = useReactTable({
     data,
