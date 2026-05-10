@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { API_BASE_URL, WS_URL } from "../config/endpoints";
 
 type RiskEvent = {
   transaction_id?: string;
@@ -27,14 +28,14 @@ export default function Dashboard() {
 
   useEffect(() => {
     // Load historical data on mount
-    fetch("http://localhost:8005/api/stats")
+    fetch(`${API_BASE_URL}/api/stats`)
       .then(r => r.json())
       .then(data => {
         setStats(prev => ({...prev, ...data}));
       })
       .catch(console.error);
 
-    fetch("http://localhost:8005/api/recent-alerts?limit=10")
+    fetch(`${API_BASE_URL}/api/recent-alerts?limit=10`)
       .then(r => r.json())
       .then(data => {
         setAlerts(data);
@@ -43,7 +44,7 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    const ws = new WebSocket("ws://localhost:8005/ws");
+    const ws = new WebSocket(WS_URL);
 
     ws.onopen = () => {
       streamStartedAt.current = Date.now();
