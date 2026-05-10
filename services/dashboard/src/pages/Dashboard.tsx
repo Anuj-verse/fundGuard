@@ -10,6 +10,7 @@ type RiskEvent = {
     rule_score?: number;
   };
 };
+const API_BASE_URL = import.meta.env.VITE_DASHBOARD_API_BASE_URL ?? "http://localhost:8005";
 
 export default function Dashboard() {
   const [alerts, setAlerts] = useState<RiskEvent[]>([]);
@@ -26,6 +27,28 @@ export default function Dashboard() {
   });
 
   useEffect(() => {
+    void (async () => {
+      try {
+        const [alertsResp, statsResp] = await Promise.all([
+          fetch(`${API_BASE_URL}/api/recent-alerts?limit=10`),
+          fetch(`${API_BASE_URL}/api/stats`),
+        ]);
+        if (alertsResp.ok) {
+          const initialAlerts = (await alertsResp.json()) as RiskEvent[];
+          setAlerts(initialAlerts);
+          if (initialAlerts.length > 0) {
+            setLatestEvent(initialAlerts[0]);
+          }
+        }
+        if (statsResp.ok) {
+          const initialStats = await statsResp.json();
+          setStats((prev) => ({ ...prev, ...initialStats }));
+        }
+      } catch {
+        // fallback to live websocket-only mode
+      }
+    })();
+
     const ws = new WebSocket("ws://localhost:8005/ws");
 
     ws.onopen = () => {

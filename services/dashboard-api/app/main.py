@@ -1,6 +1,9 @@
 import os
 import json
 import asyncio
+import sqlite3
+import threading
+from datetime import datetime, timezone
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,6 +14,8 @@ import xml.etree.ElementTree as ET
 KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "localhost:9092")
 LLM_SERVICE_URL = os.getenv("LLM_SERVICE_URL", "http://localhost:8004")
 GRAPH_SERVICE_URL = os.getenv("GRAPH_SERVICE_URL", "http://localhost:8002")
+DB_PATH = os.getenv("DASHBOARD_DB_PATH", "/tmp/fundguard_dashboard.db")
+MIN_ELAPSED_MINUTES = 1.0 / 60.0
 
 app = FastAPI(title="Dashboard API")
 
@@ -23,9 +28,86 @@ app.add_middleware(
 )
 
 clients = set()
+db_lock = threading.Lock()
+
+
+def _db_connection():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    with db_lock:
+        conn = _db_connection()
+        try:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS risk_scores (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    transaction_id TEXT NOT NULL,
+                    unified_score REAL NOT NULL,
+                    decision TEXT NOT NULL,
+                    edge_score REAL NOT NULL DEFAULT 0.0,
+                    graph_score REAL NOT NULL DEFAULT 0.0,
+                    rule_score REAL NOT NULL DEFAULT 0.0,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS cases (
+                    id TEXT PRIMARY KEY,
+                    transaction_id TEXT NOT NULL,
+                    risk_score REAL NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def persist_risk_score(payload: dict):
+    txn_id = payload.get("transaction_id") or f"TXN-{int(datetime.now(tz=timezone.utc).timestamp() * 1000)}"
+    decision = str(payload.get("decision") or "APPROVE")
+    unified_score = float(payload.get("unified_score") or 0.0)
+    components = payload.get("components") or {}
+    edge_score = float(components.get("edge_score") or 0.0)
+    graph_score = float(components.get("graph_score") or 0.0)
+    rule_score = float(components.get("rule_score") or 0.0)
+    created_at = datetime.now(tz=timezone.utc).isoformat()
+
+    with db_lock:
+        conn = _db_connection()
+        try:
+            conn.execute(
+                """
+                INSERT INTO risk_scores (
+                    transaction_id, unified_score, decision, edge_score, graph_score, rule_score, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (txn_id, unified_score, decision, edge_score, graph_score, rule_score, created_at),
+            )
+            if decision != "APPROVE":
+                case_id = f"CASE-{txn_id}"
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO cases (id, transaction_id, risk_score, status, created_at)
+                    VALUES (?, ?, ?, 'Open', ?)
+                    """,
+                    (case_id, txn_id, unified_score * 100, created_at),
+                )
+            conn.commit()
+        finally:
+            conn.close()
 
 @app.on_event("startup")
 async def startup_event():
+    init_db()
     asyncio.create_task(consume_risk_scores())
 
 async def consume_risk_scores():
@@ -41,6 +123,7 @@ async def consume_risk_scores():
             try:
                 async for msg in consumer:
                     payload = msg.value
+                    persist_risk_score(payload)
                     for ws in list(clients):
                         try:
                             await ws.send_json(payload)
@@ -62,6 +145,75 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         clients.remove(websocket)
+
+
+@app.get("/api/recent-alerts")
+async def recent_alerts(limit: int = 20):
+    with db_lock:
+        conn = _db_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT transaction_id, unified_score, decision, created_at
+                FROM risk_scores
+                WHERE decision != 'APPROVE'
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (max(1, min(limit, 200)),),
+            ).fetchall()
+        finally:
+            conn.close()
+    return [dict(row) for row in rows]
+
+
+@app.get("/api/stats")
+async def dashboard_stats():
+    with db_lock:
+        conn = _db_connection()
+        try:
+            total = conn.execute("SELECT COUNT(*) FROM risk_scores").fetchone()[0]
+            rejected = conn.execute("SELECT COUNT(*) FROM risk_scores WHERE decision = 'REJECT'").fetchone()[0]
+            alerts = conn.execute("SELECT COUNT(*) FROM risk_scores WHERE decision != 'APPROVE'").fetchone()[0]
+            first_ts = conn.execute("SELECT created_at FROM risk_scores ORDER BY created_at ASC LIMIT 1").fetchone()
+        finally:
+            conn.close()
+
+    if first_ts:
+        started = datetime.fromisoformat(first_ts[0])
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        elapsed_minutes = max((datetime.now(tz=timezone.utc) - started).total_seconds() / 60.0, MIN_ELAPSED_MINUTES)
+    else:
+        elapsed_minutes = MIN_ELAPSED_MINUTES
+
+    return {
+        "fraudRate": f"{((rejected / total) * 100 if total else 0.0):.2f}%",
+        "activeAlerts": alerts,
+        "transMin": f"{(total / elapsed_minutes if total else 0.0):.1f}",
+        "highRisk": rejected,
+        "liveEvents": total,
+        "rejectedEvents": rejected,
+    }
+
+
+@app.get("/api/cases")
+async def list_cases(limit: int = 100):
+    with db_lock:
+        conn = _db_connection()
+        try:
+            rows = conn.execute(
+                """
+                SELECT id, transaction_id, risk_score, status, created_at
+                FROM cases
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (max(1, min(limit, 500)),),
+            ).fetchall()
+        finally:
+            conn.close()
+    return [dict(row) for row in rows]
 
 @app.post("/api/explain")
 async def explain_transaction(payload: dict):
