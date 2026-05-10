@@ -8,6 +8,8 @@ import {
   createColumnHelper
 } from '@tanstack/react-table';
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8005';
+
 type CaseData = {
   id: string;
   accountId: string;
@@ -63,7 +65,7 @@ export default function Cases() {
 
   const loadCases = useCallback(async () => {
     try {
-      const response = await fetch('http://localhost:8005/api/cases')
+      const response = await fetch(`${API_BASE_URL}/api/cases`)
       if (!response.ok) return
       const items = (await response.json()) as CaseData[]
       setData(items)
@@ -77,12 +79,18 @@ export default function Cases() {
   }, [loadCases])
 
   const updateStatus = useCallback(async (id: string, status: string) => {
-    await fetch(`http://localhost:8005/api/cases/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status }),
-    })
-    loadCases()
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/cases/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      })
+      if (response.ok) {
+        loadCases()
+      }
+    } catch {
+      return
+    }
   }, [loadCases])
 
   const table = useReactTable({

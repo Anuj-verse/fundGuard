@@ -11,7 +11,8 @@ type RiskEvent = {
   };
 };
 
-const API_BASE_URL = "http://localhost:8005";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8005";
+const WS_URL = import.meta.env.VITE_WS_URL ?? API_BASE_URL.replace("http", "ws") + "/ws";
 
 export default function Dashboard() {
   const [alerts, setAlerts] = useState<RiskEvent[]>([]);
@@ -44,7 +45,7 @@ export default function Dashboard() {
       })
       .catch(() => undefined);
 
-    const ws = new WebSocket("ws://localhost:8005/ws");
+    const ws = new WebSocket(WS_URL);
 
     ws.onopen = () => {
       streamStartedAt.current = Date.now();
