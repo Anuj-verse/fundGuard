@@ -181,6 +181,8 @@ async def dashboard_stats():
 
     if first_ts:
         started = datetime.fromisoformat(first_ts[0])
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
         elapsed_minutes = max((datetime.now(tz=timezone.utc) - started).total_seconds() / 60.0, MIN_ELAPSED_MINUTES)
     else:
         elapsed_minutes = MIN_ELAPSED_MINUTES
