@@ -28,6 +28,7 @@ def test_recent_alerts_and_stats(tmp_path):
     assert alerts_resp.status_code == 200
     alerts = alerts_resp.json()
     assert len(alerts) == 2
+    assert all(alert["decision"] != "APPROVE" for alert in alerts)
     assert alerts[0]["decision"] in {"REJECT", "REVIEW"}
 
     stats_resp = client.get("/api/stats")
