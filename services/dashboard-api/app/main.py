@@ -7,6 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from aiokafka import AIOKafkaConsumer
 import httpx
 import xml.etree.ElementTree as ET
+from app.database import engine
+from app.models import Base
+from app.routes.history import router as history_router
+from app.routes.cases import router as cases_router
 
 KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "localhost:9092")
 LLM_SERVICE_URL = os.getenv("LLM_SERVICE_URL", "http://localhost:8004")
@@ -26,6 +30,17 @@ clients = set()
 
 @app.on_event("startup")
 async def startup_event():
+    # Ensure DB tables exist (uses same DATABASE_URL as risk-engine when configured)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            print("Dashboard API DB tables ensured")
+    except Exception as e:
+        print(f"Warning: could not create DB tables for dashboard-api: {e}")
+
+    app.include_router(history_router)
+    app.include_router(cases_router)
+
     asyncio.create_task(consume_risk_scores())
 
 async def consume_risk_scores():

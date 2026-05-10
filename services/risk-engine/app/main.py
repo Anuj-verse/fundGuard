@@ -3,6 +3,9 @@ import time
 import json
 import threading
 from kafka import KafkaProducer, KafkaConsumer
+import asyncio
+from app.database import engine, async_session
+from app.models import Base, RiskScoreRecord, Case
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 
@@ -88,6 +91,43 @@ def consume_graph_events():
                             "graph_flags": graph_flags
                         }
                     }
+                    # Persist to DB
+                    try:
+                        async def persist():
+                            async with async_session() as session:
+                                record = RiskScoreRecord(
+                                    txn_id=txn_id,
+                                    sender_account=txn_dict.get("sender_account_id"),
+                                    receiver_account=txn_dict.get("receiver_account_id"),
+                                    amount=float(txn_dict.get("amount", 0)),
+                                    final_score=unified_score,
+                                    edge_score=edge_score,
+                                    graph_score=graph_score,
+                                    alert_level=("HIGH" if unified_score > 0.8 else ("MEDIUM" if unified_score > 0.5 else "LOW")),
+                                    patterns=graph_flags,
+                                    graph_features={},
+                                    decision=decision,
+                                )
+                                session.add(record)
+                                await session.commit()
+
+                                # Auto-create case for high alerts
+                                if record.alert_level in ("HIGH", "CRITICAL"):
+                                    existing = await session.get(Case, record.txn_id)
+                                    if not existing:
+                                        case = Case(
+                                            txn_id=record.txn_id,
+                                            sender_account=record.sender_account,
+                                            final_score=record.final_score,
+                                            alert_level=record.alert_level,
+                                            patterns=record.patterns,
+                                        )
+                                        session.add(case)
+                                        await session.commit()
+
+                        asyncio.run(persist())
+                    except Exception as e:
+                        print(f"Warning: failed to persist risk record: {e}")
 
                     active_producer = get_or_create_producer()
                     if active_producer:
@@ -106,6 +146,14 @@ def consume_graph_events():
 async def lifespan(app: FastAPI):
     global producer, consumer_thread, running
     running = True
+    # Ensure DB tables exist
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            print("Risk-engine DB tables ensured")
+    except Exception as e:
+        print(f"Warning: could not create DB tables: {e}")
+
     get_or_create_producer()
     consumer_thread = threading.Thread(target=consume_graph_events, daemon=True)
     consumer_thread.start()
