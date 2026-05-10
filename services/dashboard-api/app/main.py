@@ -1,7 +1,9 @@
 import os
 import json
 import asyncio
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from collections import deque
+from datetime import datetime
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from aiokafka import AIOKafkaConsumer
@@ -23,6 +25,50 @@ app.add_middleware(
 )
 
 clients = set()
+risk_history = deque(maxlen=1000)
+cases_store = {}
+txn_to_case = {}
+
+
+def _to_iso(value):
+    if isinstance(value, str):
+        return value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return datetime.utcnow().isoformat()
+
+
+def _parse_iso(value):
+    if not value:
+        return datetime.utcnow()
+    if value.endswith("Z"):
+        value = value.replace("Z", "+00:00")
+    return datetime.fromisoformat(value)
+
+
+def ingest_risk_event(payload: dict):
+    event = dict(payload)
+    event["received_at"] = _to_iso(event.get("received_at"))
+    risk_history.append(event)
+
+    decision = str(event.get("decision", "APPROVE")).upper()
+    if decision in {"REJECT", "REVIEW"}:
+        txn_id = event.get("transaction_id", "unknown")
+        case_id = txn_to_case.get(txn_id)
+        if not case_id:
+            case_id = f"CASE-{len(cases_store) + 1:04d}"
+            txn_to_case[txn_id] = case_id
+            cases_store[case_id] = {
+                "id": case_id,
+                "transactionId": txn_id,
+                "accountId": event.get("account_id", "unknown"),
+                "riskScore": round(float(event.get("unified_score", 0.0)) * 100, 2),
+                "status": "Open",
+                "created": event["received_at"],
+            }
+        else:
+            cases_store[case_id]["riskScore"] = round(float(event.get("unified_score", 0.0)) * 100, 2)
+    return event
 
 @app.on_event("startup")
 async def startup_event():
@@ -40,7 +86,7 @@ async def consume_risk_scores():
             await consumer.start()
             try:
                 async for msg in consumer:
-                    payload = msg.value
+                    payload = ingest_risk_event(msg.value)
                     for ws in list(clients):
                         try:
                             await ws.send_json(payload)
@@ -62,6 +108,53 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         clients.remove(websocket)
+
+@app.get("/api/history/recent-alerts")
+async def get_recent_alerts(limit: int = 10):
+    capped_limit = max(1, min(limit, 100))
+    alerts = [e for e in reversed(risk_history) if str(e.get("decision", "")).upper() != "APPROVE"]
+    return alerts[:capped_limit]
+
+@app.get("/api/history/dashboard-stats")
+async def get_dashboard_stats():
+    events = list(risk_history)
+    live_events = len(events)
+    rejected_events = sum(1 for e in events if str(e.get("decision", "")).upper() == "REJECT")
+    active_alerts = sum(1 for e in events if str(e.get("decision", "")).upper() != "APPROVE")
+    high_risk = rejected_events
+
+    fraud_rate = "0.00%"
+    trans_min = "0.0"
+    if live_events:
+        newest = _parse_iso(events[-1].get("received_at"))
+        oldest = _parse_iso(events[0].get("received_at"))
+        elapsed_minutes = max((newest - oldest).total_seconds() / 60, 1 / 60)
+        trans_min = f"{(live_events / elapsed_minutes):.1f}"
+        fraud_rate = f"{((rejected_events / live_events) * 100):.2f}%"
+
+    return {
+        "fraudRate": fraud_rate,
+        "activeAlerts": active_alerts,
+        "transMin": trans_min,
+        "highRisk": high_risk,
+        "liveEvents": live_events,
+        "rejectedEvents": rejected_events,
+    }
+
+@app.get("/api/cases")
+async def list_cases():
+    return sorted(cases_store.values(), key=lambda c: c["created"], reverse=True)
+
+@app.patch("/api/cases/{case_id}")
+async def update_case(case_id: str, payload: dict):
+    case = cases_store.get(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    status = payload.get("status")
+    if not status:
+        raise HTTPException(status_code=400, detail="Missing status")
+    case["status"] = status
+    return case
 
 @app.post("/api/explain")
 async def explain_transaction(payload: dict):

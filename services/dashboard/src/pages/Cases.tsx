@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -11,6 +11,7 @@ import {
 type CaseData = {
   id: string;
   accountId: string;
+  transactionId: string;
   riskScore: number;
   status: string;
   created: string;
@@ -25,6 +26,10 @@ const columns = [
   }),
   columnHelper.accessor('accountId', {
     header: 'Account ID',
+    cell: info => <span className="font-mono text-gray-400">{info.getValue()}</span>,
+  }),
+  columnHelper.accessor('transactionId', {
+    header: 'Transaction ID',
     cell: info => <span className="font-mono text-gray-400">{info.getValue()}</span>,
   }),
   columnHelper.accessor('riskScore', {
@@ -54,12 +59,31 @@ const columns = [
 ]
 
 export default function Cases() {
-  const data = useMemo<CaseData[]>(() => [
-    { id: 'CASE-1001', accountId: 'ACC-09923', riskScore: 92, status: 'Open', created: '2026-05-10T10:15:00' },
-    { id: 'CASE-1002', accountId: 'ACC-01044', riskScore: 85, status: 'Open', created: '2026-05-10T09:42:00' },
-    { id: 'CASE-1003', accountId: 'ACC-54421', riskScore: 65, status: 'Investigating', created: '2026-05-09T16:20:00' },
-    { id: 'CASE-1004', accountId: 'ACC-99812', riskScore: 40, status: 'Closed', created: '2026-05-08T11:05:00' },
-  ], [])
+  const [data, setData] = useState<CaseData[]>([])
+
+  const loadCases = useCallback(async () => {
+    try {
+      const response = await fetch('http://localhost:8005/api/cases')
+      if (!response.ok) return
+      const items = (await response.json()) as CaseData[]
+      setData(items)
+    } catch {
+      setData([])
+    }
+  }, [])
+
+  useEffect(() => {
+    loadCases()
+  }, [loadCases])
+
+  const updateStatus = useCallback(async (id: string, status: string) => {
+    await fetch(`http://localhost:8005/api/cases/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    })
+    loadCases()
+  }, [loadCases])
 
   const table = useReactTable({
     data,
@@ -75,7 +99,7 @@ export default function Cases() {
       <div className="bg-dark-surface border border-gray-800 rounded-xl overflow-hidden">
          <div className="p-6 border-b border-gray-800 flex justify-between items-center">
             <h3 className="font-semibold text-lg">Active Investigations</h3>
-            <button className="bg-gray-800 text-gray-200 px-4 py-2 rounded-lg hover:bg-gray-700 transition">Filter</button>
+            <button onClick={loadCases} className="bg-gray-800 text-gray-200 px-4 py-2 rounded-lg hover:bg-gray-700 transition">Refresh</button>
          </div>
          <div className="p-6 overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -92,6 +116,7 @@ export default function Cases() {
                             )}
                       </th>
                     ))}
+                    <th className="p-4 text-sm font-semibold text-gray-400 uppercase tracking-wider">Actions</th>
                   </tr>
                 ))}
               </thead>
@@ -103,6 +128,10 @@ export default function Cases() {
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </td>
                     ))}
+                    <td className="p-4 flex gap-2">
+                      <button onClick={() => updateStatus(row.original.id, 'Investigating')} className="px-2 py-1 rounded bg-gray-800 text-gray-300 text-xs">Investigate</button>
+                      <button onClick={() => updateStatus(row.original.id, 'Closed')} className="px-2 py-1 rounded bg-gray-800 text-gray-300 text-xs">Close</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
