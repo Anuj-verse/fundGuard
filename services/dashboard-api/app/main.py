@@ -15,6 +15,7 @@ KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "localhost:9092")
 LLM_SERVICE_URL = os.getenv("LLM_SERVICE_URL", "http://localhost:8004")
 GRAPH_SERVICE_URL = os.getenv("GRAPH_SERVICE_URL", "http://localhost:8002")
 DB_PATH = os.getenv("DASHBOARD_DB_PATH", "/tmp/fundguard_dashboard.db")
+MIN_ELAPSED_MINUTES = 1.0 / 60.0
 
 app = FastAPI(title="Dashboard API")
 
@@ -31,7 +32,7 @@ db_lock = threading.Lock()
 
 
 def _db_connection():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -180,9 +181,9 @@ async def dashboard_stats():
 
     if first_ts:
         started = datetime.fromisoformat(first_ts[0])
-        elapsed_minutes = max((datetime.now(tz=timezone.utc) - started).total_seconds() / 60.0, 1 / 60)
+        elapsed_minutes = max((datetime.now(tz=timezone.utc) - started).total_seconds() / 60.0, MIN_ELAPSED_MINUTES)
     else:
-        elapsed_minutes = 1 / 60
+        elapsed_minutes = MIN_ELAPSED_MINUTES
 
     return {
         "fraudRate": f"{((rejected / total) * 100 if total else 0.0):.2f}%",

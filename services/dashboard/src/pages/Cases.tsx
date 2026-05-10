@@ -15,6 +15,7 @@ type CaseData = {
   status: string;
   created: string;
 }
+const API_BASE_URL = import.meta.env.VITE_DASHBOARD_API_BASE_URL ?? "http://localhost:8005";
 
 const columnHelper = createColumnHelper<CaseData>()
 
@@ -59,7 +60,7 @@ export default function Cases() {
   useEffect(() => {
     void (async () => {
       try {
-        const resp = await fetch("http://localhost:8005/api/cases?limit=200");
+        const resp = await fetch(`${API_BASE_URL}/api/cases?limit=200`);
         if (!resp.ok) {
           return;
         }

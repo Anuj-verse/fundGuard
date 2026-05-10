@@ -8,6 +8,7 @@ type AlertRow = {
   score: number;
   decision: string;
 };
+const API_BASE_URL = import.meta.env.VITE_DASHBOARD_API_BASE_URL ?? "http://localhost:8005";
 
 export default function Alerts() {
   const [alerts, setAlerts] = useState<AlertRow[]>([]);
@@ -23,7 +24,7 @@ export default function Alerts() {
   useEffect(() => {
     void (async () => {
       try {
-        const resp = await fetch("http://localhost:8005/api/recent-alerts?limit=100");
+        const resp = await fetch(`${API_BASE_URL}/api/recent-alerts?limit=100`);
         if (!resp.ok) {
           return;
         }
@@ -34,7 +35,7 @@ export default function Alerts() {
             .reverse()
             .map((row: { transaction_id?: string; unified_score?: number; decision?: string; created_at?: string }) => ({
               time: row.created_at ? new Date(row.created_at).toLocaleTimeString() : new Date().toLocaleTimeString(),
-              transaction_id: row.transaction_id || `TXN-${Math.floor(Math.random() * 1000000)}`,
+              transaction_id: row.transaction_id || "UNKNOWN_TXN",
               details: "Historical anomaly from risk stream",
               score: row.unified_score || 0.0,
               decision: row.decision || "REVIEW",

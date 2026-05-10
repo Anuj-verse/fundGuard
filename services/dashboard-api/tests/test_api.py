@@ -1,8 +1,16 @@
 from pathlib import Path
 from fastapi.testclient import TestClient
 import app.main as dashboard_main
+import pytest
 
 client = TestClient(dashboard_main.app)
+
+
+@pytest.fixture(autouse=True)
+def reset_db_path():
+    original_db_path = dashboard_main.DB_PATH
+    yield
+    dashboard_main.DB_PATH = original_db_path
 
 
 def _seed(db_path: Path):

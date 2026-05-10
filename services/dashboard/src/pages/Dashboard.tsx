@@ -10,6 +10,7 @@ type RiskEvent = {
     rule_score?: number;
   };
 };
+const API_BASE_URL = import.meta.env.VITE_DASHBOARD_API_BASE_URL ?? "http://localhost:8005";
 
 export default function Dashboard() {
   const [alerts, setAlerts] = useState<RiskEvent[]>([]);
@@ -29,8 +30,8 @@ export default function Dashboard() {
     void (async () => {
       try {
         const [alertsResp, statsResp] = await Promise.all([
-          fetch("http://localhost:8005/api/recent-alerts?limit=10"),
-          fetch("http://localhost:8005/api/stats"),
+          fetch(`${API_BASE_URL}/api/recent-alerts?limit=10`),
+          fetch(`${API_BASE_URL}/api/stats`),
         ]);
         if (alertsResp.ok) {
           const initialAlerts = (await alertsResp.json()) as RiskEvent[];
