@@ -7,6 +7,7 @@ import {
   flexRender,
   createColumnHelper
 } from '@tanstack/react-table';
+import { API_BASE_URL } from '../config/endpoints';
 
 type CaseData = {
   id: string;
@@ -25,7 +26,7 @@ export default function Cases() {
 
   const fetchCases = () => {
     setLoading(true);
-    fetch("http://localhost:8005/api/cases")
+    fetch(`${API_BASE_URL}/api/cases`)
       .then(r => r.json())
       .then(res => {
         setData(res);
@@ -39,15 +40,21 @@ export default function Cases() {
   }, []);
 
   const updateCaseStatus = (id: string, newStatus: string) => {
-    fetch(`http://localhost:8005/api/cases/${id}`, {
+    fetch(`${API_BASE_URL}/api/cases/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: newStatus })
     })
-    .then(r => r.json())
+    .then(r => {
+      if (!r.ok) {
+        throw new Error('Failed to update case');
+      }
+      return r.json();
+    })
     .then(() => {
-       fetchCases(); // Refresh list
-    });
+       fetchCases();
+    })
+    .catch(console.error);
   };
 
   const columns = useMemo(() => [
