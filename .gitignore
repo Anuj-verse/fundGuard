@@ -2,6 +2,18 @@
 __pycache__/
 *.py[cod]
 *$py.class
+# FAISS vector database
+data/faiss_index/
+
+# Python cache
+.pytest_cache/
+
+# Model/cache files
+.huggingface/
+cache/
+
+# Mac/Linux hidden
+*.pid
 
 # Virtual environments
 .venv/
