@@ -5,7 +5,8 @@ import GraphView from "./pages/GraphView";
 import Cases from "./pages/Cases";
 import Alerts from "./pages/Alerts";
 import Reports from "./pages/Reports";
-
+import Profile from "./pages/Profile";
+import Documentation from "./pages/Documentation";
 function App() {
   return (
     <BrowserRouter>
@@ -17,6 +18,8 @@ function App() {
           <Route path="cases" element={<Cases />} />
           <Route path="alerts" element={<Alerts />} />
           <Route path="reports" element={<Reports />} />
+           <Route path="profile" element={<Profile />} />
+              <Route path="docs" element={<Documentation/>} />
         </Route>
       </Routes>
     </BrowserRouter>
